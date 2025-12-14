@@ -1,78 +1,60 @@
-// telemetry_tx.c
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <termios.h>
 #include <string.h>
 #include <math.h>
+#include <unistd.h>
 #include <time.h>
 
-#define UART_DEV "/dev/ttyUSB0"
-#define BAUD B115200
+#define FRAME_INTERVAL_MS 50   // 20 Hz
 
-unsigned char calc_checksum(const char *s)
+unsigned char check_sum(const char *data)
 {
     unsigned char chk = 0;
-    while (*s) chk ^= (unsigned char)(*s++);
+    while (*data)
+    {
+        chk ^= *data;
+        data++;
+    }
     return chk;
-}
-
-long timestamp_ms()
-{
-    struct timespec ts;
-    clock_gettime(CLOCK_REALTIME, &ts);
-    return (ts.tv_sec * 1000L) + (ts.tv_nsec / 1000000);
 }
 
 int main()
 {
-    int fd = open(UART_DEV, O_RDWR | O_NOCTTY);
-    if (fd < 0) {
-        perror("UART open failed");
-        return 1;
+    unsigned long times = 0;
+    char arr[256];
+    unsigned char sum;
+
+    srand(time(NULL));
+
+    while (1)
+    {
+        // Simulated sensor data
+        float ax = sin(times / 1000.0) * 2.0;
+        float ay = cos(times / 1000.0) * 2.0;
+        float az = 9.8 + ((rand() % 100) / 100.0 - 0.5);
+
+        float bx = ((rand() % 200) / 100.0 - 1.0);
+        float by = ((rand() % 200) / 100.0 - 1.0);
+        float cz = ((rand() % 200) / 100.0 - 1.0);
+
+        float alt = 100.0 + sin(times / 5000.0) * 5.0;
+        float temp = 25.0 + cos(times / 5000.0) * 0.5;
+
+        // Build arr 
+        snprintf(arr, sizeof(arr),
+                 "L1,%lu,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f",
+                 times, ax, ay, az, bx, by, cz, alt, temp);
+
+        // Calculate check_sum
+        sum = check_sum(arr);
+
+        // Output full frame (UART simulation)
+        printf("$%s*%02X\n", arr, sum);
+        fflush(stdout);
+
+        usleep(FRAME_INTERVAL_MS * 1000);
+        times = times + FRAME_INTERVAL_MS;
     }
 
-    struct termios tty;
-    tcgetattr(fd, &tty);
-    cfsetospeed(&tty, BAUD);
-    cfsetispeed(&tty, BAUD);
-    tty.c_cflag = CS8 | CREAD | CLOCAL;
-    tty.c_iflag = tty.c_oflag = tty.c_lflag = 0;
-    tcsetattr(fd, TCSANOW, &tty);
-
-    double t = 0.0;
-
-    while (1) {
-        long ts = timestamp_ms();
-
-        double ax = sin(t);
-        double ay = cos(t);
-        double az = 9.8 + 0.05 * sin(2*t);
-
-        double gx = 10 * sin(t);
-        double gy = 10 * cos(t);
-        double gz = 5 * sin(0.5*t);
-
-        double alt  = 100.0 + 2.0 * sin(0.2*t);
-        double temp = 25.0 + 1.0 * cos(0.1*t);
-
-        char payload[256];
-        snprintf(payload, sizeof(payload),
-            "L1,%ld,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f",
-            ts, ax, ay, az, gx, gy, gz, alt, temp);
-
-        unsigned char chk = calc_checksum(payload);
-
-        char frame[300];
-        snprintf(frame, sizeof(frame), "$%s*%02X\r\n", payload, chk);
-
-        write(fd, frame, strlen(frame));
-
-        t += 0.05;
-        usleep(50000); // 20 Hz
-    }
-
-    close(fd);
     return 0;
 }
