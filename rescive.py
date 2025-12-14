@@ -1,51 +1,43 @@
-# uart_rx.py
-import serial
+import sys
 import csv
-import time
 
-PORT = "/dev/ttyUSB0"
-BAUD = 115200
-OUT_FILE = "output.csv"
+def valid_sum(frame):
+    if not frame.startswith('$') or '*' not in frame:
+        return False
 
-def calc_checksum(s):
-    chk = 0
-    for c in s:
-        chk ^= ord(c)
-    return chk
+    try:
+        data, recv_chk = frame[1:].split('*')
+        calc_chk = 0
+        for ch in data:
+            calc_chk ^= ord(ch)
 
-ser = serial.Serial(PORT, BAUD, timeout=1)
+        return calc_chk == int(recv_chk, 16)
+    except:
+        return False
 
-with open(OUT_FILE, "w", newline="") as f:
-    writer = csv.writer(f)
+
+with open("output.csv", "w", newline="") as csvfile:
+    writer = csv.writer(csvfile)
     writer.writerow([
-        "timestamp","ax","ay","az","gx","gy","gz","alt","temp"
+        "timestamp_ms", "ax", "ay", "az",
+        "gx", "gy", "gz", "alt", "temp"
     ])
 
-    print("Listening for telemetry...\n")
+    print("Python receiver started...\n")
 
-    while True:
-        line = ser.readline().decode(errors="ignore").strip()
-        if not line.startswith("$") or "*" not in line:
-            continue
+    for line in sys.stdin:
+        line = line.strip()
+        if valid_sum(line):
+            payload = line[1:line.index('*')]
+            fields = payload.split(',')
 
-        body, rx_chk = line[1:].split("*")
-        rx_chk = int(rx_chk, 16)
-
-        if calc_checksum(body) != rx_chk:
-            print("Checksum error")
-            continue
-
-        fields = body.split(",")
-        if fields[0] != "L1":
-            continue
-
-        data = fields[1:]
-        writer.writerow(data)
-        f.flush()
-
-        print(
-            f"t={data[0]} | "
-            f"A=({data[1]}, {data[2]}, {data[3]}) "
-            f"G=({data[4]}, {data[5]}, {data[6]}) "
-            f"Alt={data[7]}m Temp={data[8]}C"
-        )
+            if fields[0] == "L1":
+                writer.writerow(fields[1:])
+                print(
+                    f"Time={fields[1]} ms | "
+                    f"Ax={fields[2]} Ay={fields[3]} Az={fields[4]} | "
+                    f"Gx={fields[5]} Gy={fields[6]} Gz={fields[7]} | "
+                    f"Alt={fields[8]} Temp={fields[9]}"
+                )
+        else:
+            print("Invalid frame:", line)
